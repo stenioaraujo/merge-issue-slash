@@ -12,8 +12,9 @@ import hmac
 import json
 import os
 import sys
+import threading
 import time
-from threading import Thread
+from collections import namedtuple
 
 from flask import request
 from flask_api import FlaskAPI, status
@@ -39,6 +40,16 @@ ACCEPT_ISSUES_KEYWORDS = ["issue", "issues"]
 
 groups_name_to_id = {}
 
+# This is a hack to share the request with sub threads
+HackyRequest = namedtuple("HackyRequest",
+                          ["data", "get_data", "headers", "args"])
+hacky_shared_request = {}
+
+class HackyThread(threading.Thread):
+    def __init__(self, *args, **kwargs):
+        self.parent = threading.current_thread()
+        threading.Thread.__init__(self, *args, **kwargs)
+
 
 @app.route("/")
 def index():
@@ -47,23 +58,26 @@ def index():
 
 @app.route("/slash", methods=['POST'])
 def slash():
+    _save_hacky_request()
+    hacky_request = _get_hacky_request()
+
     if not _validate_request():
+        channel_id = hacky_request.data.get('channel_id')
         return ("Desculpa, _teoricamente_ esse comando só pode ser executado "
-            "em grupos específicos. :white_frowning_face:")
+            "em canais específicos. Este canal (%s) não é um deles. "
+            ":white_frowning_face:" % channel_id)
 
-    print(request.data)
-
-    command = request.data.get("command")
-    command_text = request.data.get("text", '').lower()
-    response_url = request.data.get("response_url")
+    command = hacky_request.data.get("command")
+    command_text = hacky_request.data.get("text", '').lower()
+    response_url = hacky_request.data.get("response_url")
 
     if command_text in ACCEPT_MR_KEYWORDS:
-        t = Thread(
+        t = HackyThread(
             target=_send_delayed_slackish_items,
             args=(open_merge_requests, "Merge Requests", response_url))
         t.start()
     elif command_text in ACCEPT_ISSUES_KEYWORDS:
-        t = Thread(
+        t = HackyThread(
             target=_send_delayed_slackish_items,
             args=(open_issues, "Issues", response_url))
         t.start()
@@ -76,6 +90,39 @@ def slash():
     }
 
     return response
+
+
+def _save_hacky_request():
+    _free_hacky_request()
+    current_thread_id = threading.current_thread().ident
+    hacky_shared_request[current_thread_id] = HackyRequest(
+        get_data=lambda: request.get_data(),
+        data=request.data,
+        args=request.args,
+        headers=request.headers)
+
+
+def _get_hacky_request():
+    current_thread = threading.current_thread()
+    if hasattr(current_thread, "parent"):
+        return hacky_shared_request.get(current_thread.parent.ident)
+    else:
+        return request
+
+
+def _free_hacky_request():
+    alive_threads = []
+    for thread in threading.enumerate():
+        if thread and thread.is_alive():
+            alive_threads.append(thread.ident)
+
+    hacky_thread_ids_to_remove = []
+    for hacky_thread_id in hacky_shared_request.keys():
+        if hacky_thread_id not in alive_threads:
+            hacky_thread_ids_to_remove.append(hacky_thread_id)
+
+    for hacky_thread_id in hacky_thread_ids_to_remove:
+        del hacky_shared_request[hacky_thread_id]
 
 
 def _send_delayed_slackish_items(get_items_method, type_item, response_url):
@@ -98,7 +145,7 @@ def _send_delayed_slackish_items(get_items_method, type_item, response_url):
                     item_msg.format(upvotes, downvotes, title, author, link))
 
         response = json.dumps({
-            "resposne_type": "in_channel",
+            "response_type": "in_channel",
             "text": '\n'.join(msg_lines)
         })
     except:
@@ -121,7 +168,7 @@ def slackish_help(command):
         msg += "\n    %s %s" % (command, command_text)
 
     response = {
-        "resposne_type": "ephemeral",
+        "response_type": "ephemeral",
         "text": msg
     }
 
@@ -129,9 +176,10 @@ def slackish_help(command):
 
 
 def _validate_request():
-    body = request.get_data()
-    timestamp = int(request.headers.get('X-Slack-Request-Timestamp', 0))
-    slack_signature = request.headers.get('X-Slack-Signature', '')
+    hacky_request = _get_hacky_request()
+    body = hacky_request.get_data()
+    timestamp = int(hacky_request.headers.get('X-Slack-Request-Timestamp', 0))
+    slack_signature = hacky_request.headers.get('X-Slack-Signature', '')
     allowed_channel_ids = ALLOWED_CHANNELS_IDS.split(',')
 
     if abs(time.time() - timestamp) > 60 * 5:
@@ -145,7 +193,7 @@ def _validate_request():
     if not hmac.compare_digest(slack_signature, my_signature):
         return False
 
-    channel_id = request.data.get('channel_id')
+    channel_id = hacky_request.data.get('channel_id')
     if channel_id not in allowed_channel_ids:
         return False
 
@@ -155,7 +203,8 @@ def _validate_request():
 @app.route("/issues")
 def open_issues():
     try:
-        groups_names_param = request.args.get('groups_names')
+        hacky_request = _get_hacky_request()
+        groups_names_param = hacky_request.args.get('groups_names')
         groups_ids = _get_groups_ids_for_names(groups_names_param.split(','))
     except:
         groups_ids = []
@@ -170,7 +219,8 @@ def open_issues():
 @app.route("/merge_requests")
 def open_merge_requests():
     try:
-        groups_names_param = request.args.get('groups_names')
+        hacky_request = _get_hacky_request()
+        groups_names_param = hacky_request.args.get('groups_names')
         groups_ids = _get_groups_ids_for_names(groups_names_param.split(','))
     except:
         groups_ids = []
@@ -248,8 +298,9 @@ def _get_open(projects_ids, path):
 
 
 def _get(url):
-    token = request.args.get("token")
-    token = token or request.headers.get("Private-Token")
+    hacky_request = _get_hacky_request()
+    token = hacky_request.args.get("token")
+    token = token or hacky_request.headers.get("Private-Token")
 
     # The thing bellow is really bad programming
     # At least it only allows a user to get information about the Merge
