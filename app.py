@@ -9,9 +9,11 @@ https://git.lsd.ufcg.edu.br/help/api/groups.md#search-for-group -- search=ztp wi
 import base64
 import hashlib
 import hmac
+import json
 import os
 import sys
 import time
+from threading import Thread
 
 from flask import request
 from flask_api import FlaskAPI, status
@@ -53,34 +55,77 @@ def slash():
 
     command = request.data.get("command")
     command_text = request.data.get("text", '').lower()
+    response_url = request.data.get("response_url")
 
     if command_text in ACCEPT_MR_KEYWORDS:
-        return slackish_merge_requests()
+        t = Thread(
+            target=_send_delayed_slackish_items,
+            args=(open_merge_requests, "Merge Requests", response_url))
+        t.start()
     elif command_text in ACCEPT_ISSUES_KEYWORDS:
-        return slackish_issues()
+        t = Thread(
+            target=_send_delayed_slackish_items,
+            args=(open_issues, "Issues", response_url))
+        t.start()
     else:
         return slackish_help(command)
 
+    response = {
+        "response_type": "ephemeral",
+        "text": "Recolhendo a informação, já já ela chega! :smile:"
+    }
 
-def slackish_merge_requests():
-    return "*Merge Requests*"
+    return response
 
 
-def slackish_issues():
-    return "*Issues*"
+def _send_delayed_slackish_items(get_items_method, type_item, response_url):
+    try:
+        items_by_group = get_items_method()
+        msg_lines = ["Open *%s*:\n" % type_item]
+        for group, items in items_by_group.items():
+            msg_lines.append("*%s*:" % group)
+            if not items:
+                msg_lines.append("    Esse grupo não tem nenhum item aberto!")
+            for item in items:
+                title = item["title"]
+                author = item["author"]["name"]
+                link = item["web_url"]
+                upvotes = item["upvotes"]
+                downvotes = item["downvotes"]
+
+                item_msg = "    :thumbsup: {}  :thumbsdown: {}  {} [{}] - {}"
+                msg_lines.append(
+                    item_msg.format(upvotes, downvotes, title, author, link))
+
+        response = json.dumps({
+            "resposne_type": "in_channel",
+            "text": '\n'.join(msg_lines)
+        })
+    except:
+        response = json.dumps({
+            "response_type": "ephemeral",
+            "text": "Não consegui a informação. Sorry :slightly_frowning_face:"
+        })
+
+    headers = {"Content-Type": "application/json"}
+    requests.post(response_url, data=response)
 
 
 def slackish_help(command):
     msg = "*Merge Requests*:"
     for command_text in ACCEPT_MR_KEYWORDS:
-        print(command_text)
         msg += "\n    %s %s" % (command, command_text)
 
     msg += "\n*Issues*:"
     for command_text in ACCEPT_ISSUES_KEYWORDS:
         msg += "\n    %s %s" % (command, command_text)
 
-    return msg
+    response = {
+        "resposne_type": "ephemeral",
+        "text": msg
+    }
+
+    return response
 
 
 def _validate_request():
