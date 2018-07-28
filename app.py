@@ -31,6 +31,10 @@ PROJECT_OPENED_ISSUES = PROJECTS_PATH + "/{}/issues?state=opened"
 PROJECT_OPENED_MERGE_REQUESTS = (
     PROJECTS_PATH + "/{}/merge_requests?state=opened")
 
+ACCEPT_MR_KEYWORDS = ["merges", "merge_requests", "mergerequests",
+    "merge requests", "merge-requests"]
+ACCEPT_ISSUES_KEYWORDS = ["issue", "issues"]
+
 groups_name_to_id = {}
 
 
@@ -41,24 +45,46 @@ def index():
 
 @app.route("/slash", methods=['POST'])
 def slash():
-    if not _verify_request():
+    if not _validate_request():
         return ("Desculpa, _teoricamente_ esse comando só pode ser executado "
             "em grupos específicos. :white_frowning_face:")
 
-    accept_mr_keywords = ["merges", "merge_requests", "mergerequests",
-        "merge requests" "merge-requests"]
-    accept_issues_keywords = ["issue", "issues"]
+    print(request.data)
 
-    msg = """Hello
-World! :smile:
-"""
+    command = request.data.get("command")
+    command_text = request.data.get("text", '').lower()
+
+    if command_text in ACCEPT_MR_KEYWORDS:
+        return slackish_merge_requests()
+    elif command_text in ACCEPT_ISSUES_KEYWORDS:
+        return slackish_issues()
+    else:
+        return slackish_help(command)
+
+
+def slackish_merge_requests():
+    return "*Merge Requests*"
+
+
+def slackish_issues():
+    return "*Issues*"
+
+
+def slackish_help(command):
+    msg = "*Merge Requests*:"
+    for command_text in ACCEPT_MR_KEYWORDS:
+        print(command_text)
+        msg += "\n    %s %s" % (command, command_text)
+
+    msg += "\n*Issues*:"
+    for command_text in ACCEPT_ISSUES_KEYWORDS:
+        msg += "\n    %s %s" % (command, command_text)
+
     return msg
 
 
-def _verify_request():
+def _validate_request():
     body = request.get_data()
-    print(request.headers)
-    print(body)
     timestamp = int(request.headers.get('X-Slack-Request-Timestamp', 0))
     slack_signature = request.headers.get('X-Slack-Signature', '')
     allowed_channel_ids = ALLOWED_CHANNELS_IDS.split(',')
@@ -66,17 +92,15 @@ def _verify_request():
     if abs(time.time() - timestamp) > 60 * 5:
         return False
 
-    sig_basestring = 'v0:%s:%s' % (str(timestamp), body)
-    digest = hmac.new(SLACK_SIGNING_SECRET, msg=sig_basestring,
-        digestmod=hashlib.sha256).digest()
-    print(digest)
+    sig_basestring = b'v0:%b:%b' % (str(timestamp).encode(), body)
+    digest = hmac.new(SLACK_SIGNING_SECRET.encode(), msg=sig_basestring,
+        digestmod=hashlib.sha256).hexdigest()
     my_signature = 'v0=%s' % digest
 
     if not hmac.compare_digest(slack_signature, my_signature):
         return False
 
     channel_id = request.data.get('channel_id')
-    print(channel_id, allowed_channel_ids)
     if channel_id not in allowed_channel_ids:
         return False
 
