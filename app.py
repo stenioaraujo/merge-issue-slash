@@ -6,8 +6,12 @@ https://git.lsd.ufcg.edu.br/help/api/groups.md#list-a-groups-projects
 https://git.lsd.ufcg.edu.br/help/api/merge_requests.md#list-project-merge-requests
 https://git.lsd.ufcg.edu.br/help/api/groups.md#search-for-group -- search=ztp will match ztp and ztp-interno
 """
+import base64
+import hashlib
+import hmac
 import os
 import sys
+import time
 
 from flask import request
 from flask_api import FlaskAPI, status
@@ -15,15 +19,17 @@ import requests
 
 app = FlaskAPI(__name__)
 
-SECRET_ACCESS_KEY = os.environ.get('SECRET_ACCESS_KEY')
+ALLOWED_CHANNELS_IDS = os.environ.get("ALLOWED_CHANNELS_IDS")
 GITLAB_PERSONAL_TOKEN = os.environ.get('GITLAB_PERSONAL_TOKEN')
+SECRET_ACCESS_KEY = os.environ.get('SECRET_ACCESS_KEY')
+SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
 
 GROUPS_PATH = "https://git.lsd.ufcg.edu.br/api/v4/groups"
-PROJECTS_PATH = "https://git.lsd.ufcg.edu.br/api/v4/projects"
 GROUP_PROJECTS = GROUPS_PATH + "/{}/projects"
+PROJECTS_PATH = "https://git.lsd.ufcg.edu.br/api/v4/projects"
+PROJECT_OPENED_ISSUES = PROJECTS_PATH + "/{}/issues?state=opened"
 PROJECT_OPENED_MERGE_REQUESTS = (
     PROJECTS_PATH + "/{}/merge_requests?state=opened")
-PROJECT_OPENED_ISSUES = PROJECTS_PATH + "/{}/issues?state=opened"
 
 groups_name_to_id = {}
 
@@ -33,8 +39,12 @@ def index():
     return {"o":"k"}
 
 
-@app.route("/slash", methods=['GET', 'POST'])
+@app.route("/slash", methods=['POST'])
 def slash():
+    if not _verify_request():
+        return ("Desculpa, _teoricamente_ esse comando só pode ser executado "
+            "em grupos específicos. :white_frowning_face:")
+
     accept_mr_keywords = ["merges", "merge_requests", "mergerequests",
         "merge requests" "merge-requests"]
     accept_issues_keywords = ["issue", "issues"]
@@ -45,9 +55,36 @@ World! :smile:
     return msg
 
 
+def _verify_request():
+    body = request.get_data()
+    print(request.headers)
+    print(body)
+    timestamp = int(request.headers.get('X-Slack-Request-Timestamp', 0))
+    slack_signature = request.headers.get('X-Slack-Signature', '')
+    allowed_channel_ids = ALLOWED_CHANNELS_IDS.split(',')
+
+    if abs(time.time() - timestamp) > 60 * 5:
+        return False
+
+    sig_basestring = 'v0:%s:%s' % (str(timestamp), body)
+    digest = hmac.new(SLACK_SIGNING_SECRET, msg=sig_basestring,
+        digestmod=hashlib.sha256).digest()
+    print(digest)
+    my_signature = 'v0=%s' % digest
+
+    if not hmac.compare_digest(slack_signature, my_signature):
+        return False
+
+    channel_id = request.data.get('channel_id')
+    print(channel_id, allowed_channel_ids)
+    if channel_id not in allowed_channel_ids:
+        return False
+
+    return True
+
+
 @app.route("/issues")
 def open_issues():
-    # 216: ztp, 241: ztp-interno
     try:
         groups_names_param = request.args.get('groups_names')
         groups_ids = _get_groups_ids_for_names(groups_names_param.split(','))
@@ -63,7 +100,6 @@ def open_issues():
 
 @app.route("/merge_requests")
 def open_merge_requests():
-    # 216: ztp, 241: ztp-interno
     try:
         groups_names_param = request.args.get('groups_names')
         groups_ids = _get_groups_ids_for_names(groups_names_param.split(','))
@@ -161,10 +197,15 @@ def _get(url):
 
 
 if __name__ == "__main__":
-    if not SECRET_ACCESS_KEY or not GITLAB_PERSONAL_TOKEN:
-        msg = ("The Environment Variables SECRET_ACCESS_KEY and "
-            "GITLAB_PERSONAL_TOKEN are needed, define them before starting "
-            "the app.")
+    envs = {
+        "ALLOWED_CHANNELS_IDS": ALLOWED_CHANNELS_IDS,
+        "GITLAB_PERSONAL_TOKEN": GITLAB_PERSONAL_TOKEN,
+        "SECRET_ACCESS_KEY": SECRET_ACCESS_KEY,
+        "SLACK_SIGNING_SECRET": SLACK_SIGNING_SECRET
+    }
+    if not all(envs.values()):
+        msg = ("All the Environment Variables %s are needed, "
+               "define them before starting the app." % envs.keys())
         raise Exception(msg)
 
     listen_ip, listen_port = "0.0.0.0", "8080"
