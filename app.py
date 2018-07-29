@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 from collections import namedtuple
+from datetime import datetime
 
 from flask import request
 from flask_api import FlaskAPI, status
@@ -128,21 +129,25 @@ def _free_hacky_request():
 def _send_delayed_slackish_items(get_items_method, type_item, response_url):
     try:
         items_by_group = get_items_method()
-        msg_lines = ["Open *%s*:\n" % type_item]
+        hacky_request = _get_hacky_request()
+        msg_lines = [
+            "<@%s>: %s %s" % (
+                hacky_request.data.get("user_id"),
+                hacky_request.data.get("command"),
+                hacky_request.data.get("text")),
+            "Open *%s*\n" % type_item
+        ]
         for group, items in items_by_group.items():
             msg_lines.append("*%s*:" % group)
             if not items:
                 msg_lines.append("    Esse grupo não tem nenhum item aberto!")
             for item in items:
-                title = item["title"]
-                author = item["author"]["name"]
-                link = item["web_url"]
-                upvotes = item["upvotes"]
-                downvotes = item["downvotes"]
-
-                item_msg = "    :thumbsup: {}  :thumbsdown: {}  {} [{}] - {}"
-                msg_lines.append(
-                    item_msg.format(upvotes, downvotes, title, author, link))
+                item_msg = (
+                    "    :thumbsup: {item[upvotes]}  "
+                    ":thumbsdown: {item[downvotes]}  {item[title]} "
+                    "- {item[web_url]} "
+                    "Criado à *{item[days_created]}* dia(s)")
+                msg_lines.append(item_msg.format(item=item))
 
         response = json.dumps({
             "response_type": "in_channel",
@@ -292,7 +297,14 @@ def _get_open(projects_ids, path):
         things_for_project = _get(path.format(project_id))
         things += things_for_project
 
-    return things
+    for thing in things:
+        date_template = "%Y-%m-%dT%H:%M:%S.%fZ"
+        created_at_datetime = datetime.strptime(thing["created_at"], date_template)
+        days_created = (datetime.utcnow() - created_at_datetime).days
+        thing["days_created"] = days_created
+
+    ordered_things = sorted(things, key=lambda t: t.get("days_created"), reverse=True)
+    return ordered_things
 
 
 def _get(url):
