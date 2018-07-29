@@ -53,7 +53,7 @@ class HackyThread(threading.Thread):
 
 @app.route("/")
 def index():
-    return {"o":"k"}
+    return {"status":"ok"}
 
 
 @app.route("/slash", methods=['POST'])
@@ -200,7 +200,6 @@ def _validate_request():
     return True
 
 
-@app.route("/issues")
 def open_issues():
     try:
         hacky_request = _get_hacky_request()
@@ -216,7 +215,6 @@ def open_issues():
     return issues
 
 
-@app.route("/merge_requests")
 def open_merge_requests():
     try:
         hacky_request = _get_hacky_request()
