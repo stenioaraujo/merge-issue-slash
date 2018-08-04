@@ -6,11 +6,9 @@ name = "pypi"
 
 
 [dev-packages]
-
 pylint = "*"
 
 
 [packages]
-
 flask-api = "*"
 requests = "*"
