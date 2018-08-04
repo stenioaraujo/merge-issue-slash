@@ -326,23 +326,13 @@ def _get(url):
     return requests.get(url, headers=headers).json()
 
 
-if __name__ == "__main__":
-    envs = {
-        "ALLOWED_CHANNELS_IDS": ALLOWED_CHANNELS_IDS,
-        "GITLAB_PERSONAL_TOKEN": GITLAB_PERSONAL_TOKEN,
-        "SECRET_ACCESS_KEY": SECRET_ACCESS_KEY,
-        "SLACK_SIGNING_SECRET": SLACK_SIGNING_SECRET
-    }
-    if not all(envs.values()):
-        msg = ("All the Environment Variables %s are needed, "
-               "define them before starting the app." % envs.keys())
-        raise Exception(msg)
-
-    listen_ip, listen_port = "0.0.0.0", "8080"
-    if len(sys.argv) > 1:
-        if ':' in sys.argv[1]:
-            listen_ip, listen_port = sys.argv[1].strip().split(':')
-        else:
-            listen_port = sys.argv[1]
-
-    app.run(debug=True, use_reloader=True, host=listen_ip, port=listen_port)
+envs = {
+    "ALLOWED_CHANNELS_IDS": ALLOWED_CHANNELS_IDS,
+    "GITLAB_PERSONAL_TOKEN": GITLAB_PERSONAL_TOKEN,
+    "SECRET_ACCESS_KEY": SECRET_ACCESS_KEY,
+    "SLACK_SIGNING_SECRET": SLACK_SIGNING_SECRET
+}
+if not all(envs.values()):
+    msg = ("All the Environment Variables %s are needed, "
+           "define them before starting the app." % envs.keys())
+    raise Exception(msg)

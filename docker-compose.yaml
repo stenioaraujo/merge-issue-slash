@@ -4,10 +4,10 @@ services:
     container_name: "merges-issues-slash"
     image: merges-issues-slash
     environment:
-      - ALLOWED_CHANNELS_IDS="" 
-      - GITLAB_PERSONAL_TOKEN="" 
-      - SECRET_ACCESS_KEY="" 
-      - SLACK_SIGNING_SECRET="" 
+      - ALLOWED_CHANNELS_IDS
+      - GITLAB_PERSONAL_TOKEN
+      - SECRET_ACCESS_KEY
+      - SLACK_SIGNING_SECRET
     ports:
       - "8082:8080"
     restart: always

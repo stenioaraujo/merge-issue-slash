@@ -11,8 +11,8 @@ RUN mkdir /app
 WORKDIR /app
 
 COPY app.py /app
+COPY run.sh /app
 
 EXPOSE 8080
 
-CMD ["python", "app.py"]
-
+ENTRYPOINT ["sh", "run.sh"]
