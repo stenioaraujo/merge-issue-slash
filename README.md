@@ -72,6 +72,7 @@ The HTTPS Certificate and Key need to be mounted on the Container where the appl
 - Start the container
 
 ```bash
+sudo docker build -t merges-issues-slash .
 sudo docker-compose up -d
 ```
 
